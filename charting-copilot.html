@@ -1,0 +1,769 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>침구과 차팅 Copilot</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <style>
+        /* 커스텀 스크롤바 스타일 (선택사항) */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #f1f1f1;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #888;
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #555;
+        }
+    </style>
+</head>
+<body class="bg-gray-50 font-sans">
+
+    <div class="max-w-7xl mx-auto p-4">
+        <div class="bg-white rounded-lg shadow-lg p-6">
+            <h1 class="text-3xl font-bold text-gray-800 mb-6 text-center">침구과 차팅 Copilot</h1>
+            <div class="grid grid-cols-1 sm:grid-cols-12 gap-6">
+                <!-- Sidebar -->
+                <div class="sm:col-span-3">
+                    <h2 class="text-lg font-semibold text-gray-700 mb-3">Chief Complaint</h2>
+                    <nav id="sidebar-nav" class="space-y-4"></nav>
+                </div>
+
+                <!-- Main Content -->
+                <main id="main-content" class="sm:col-span-5"></main>
+
+                <!-- Result View -->
+                <aside class="sm:col-span-4">
+                    <div id="result-view" class="sticky top-6 h-[calc(100vh-80px)] bg-gray-100 p-4 rounded-lg shadow-inner flex flex-col">
+                        <div class="flex justify-between items-center mb-3">
+                            <h3 class="text-lg font-semibold text-gray-700 flex items-center gap-2">
+                                <i class="fa-solid fa-clipboard-list"></i> Medical Chart
+                            </h3>
+                            <div class="flex space-x-2">
+                                <button id="copy-btn" class="flex items-center space-x-1.5 px-3 py-2 text-white rounded-md text-sm transition-all duration-200 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400">
+                                    <i class="fa-regular fa-copy"></i>
+                                    <span id="copy-btn-text">복사</span>
+                                </button>
+                                <button id="reset-btn" class="flex items-center space-x-1.5 px-3 py-2 bg-gray-600 text-white rounded-md hover:bg-gray-700 text-sm">
+                                    <i class="fa-solid fa-arrows-rotate"></i>
+                                    <span>초기화</span>
+                                </button>
+                            </div>
+                        </div>
+                        <textarea id="combined-chart-textarea" class="w-full flex-grow p-4 resize-none text-sm text-gray-800 border-2 border-gray-300 rounded-md outline-none focus:ring-2 focus:ring-blue-500" placeholder="항목을 입력하면 차팅이 자동으로 생성됩니다."></textarea>
+                        <div class="pt-2 mt-2 border-t border-gray-300">
+                            <h3 class="text-md font-semibold text-gray-700 mb-2">➕ 추가 입력</h3>
+                            <textarea id="additional-text-textarea" class="w-full h-32 p-2 resize-none text-sm text-gray-800 border-2 border-gray-300 rounded-md outline-none focus:ring-2 focus:ring-blue-500" placeholder="추가 내용을 자유롭게 입력하세요."></textarea>
+                        </div>
+                    </div>
+                </aside>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // =================================================================
+        // 0. 타입 정의 및 설정 데이터
+        // =================================================================
+        const formConfig = {
+            growth_growth: {
+                title: '#성장',
+                fields: [
+                    { type: 'group', title: '📊 기본 정보', fields: [
+                        { type: 'combined_text', label: '최근 1년 키 성장', nameNum: 'growthLastYearNum', nameText: 'growthLastYearText', unit: 'cm/yr', placeholderNum: 'Ref: 5-6', placeholderText: '서술형' },
+                        { type: 'text', label: '성장 관련 진료', name: 'growthHistory', placeholder: '예: 성장클리닉 진료 경험 있음' }
+                    ]},
+                    { type: 'symptoms_grid', color: 'red', title: '♀️♂️ 2차 성징', name: 'pubertySigns', symptoms: [
+                        { key: 'thelarche', label: '가슴멍울', textPlaceholder: 'Ref: 10세 (8세 전 r/o성조숙증)' },
+                        { key: 'pubarche', label: '음모' },
+                        { key: 'menarche', label: '초경', textPlaceholder: 'Ref: 11.5-12세' },
+                        { key: 'testicularDevelopment', label: '고환', textPlaceholder: 'Ref: 9세 이전 4cc r/o 성조숙증' }
+                    ]},
+                    { type: 'horizontal_group', color: 'green', title: '👨‍👩‍👧‍👦 부모 성장 패턴', chartFormat: 'single_line_parent_growth', fields: [
+                        { type: 'text', label: '부 (Father)', name: 'fatherGrowthPattern', placeholder: '예: 고1때 10cm 큼' },
+                        { type: 'text', label: '모 (Mother)', name: 'motherGrowthPattern', placeholder: '예: 초6때 초경, 이후 거의 안 큼' }
+                    ]},
+                    { type: 'textarea', name: 'other', title: '📝 기타' }
+                ]
+            },
+            growth_precocious_puberty: { title: '#성조숙증', fields: [] },
+            growth_underweight: {
+                title: '#저체중',
+                fields: [
+                    { type: 'group', title: '📊 기본 정보', fields: [
+                        { type: 'text', label: 'o/s', name: 'os', placeholder: '언제부터 저체중이었는지' },
+                        { type: 'text', label: '최근 1년 체중 증가', name: 'weightGainLastYear', placeholder: '예: 1kg' },
+                        { type: 'horizontal_group', fields: [
+                            { type: 'text', label: '식습관', name: 'eatingHabits', placeholder: '예: 소식, 편식' },
+                            { type: 'text', label: '운동량', name: 'activityLevel', placeholder: '예: 주 3회 축구' }
+                        ]},
+                        { type: 'text', label: '부모 체형', name: 'parentBodyType', placeholder: '예: 부(마름), 모(보통)' }
+                    ]},
+                    { type: 'textarea', name: 'other', title: '📝 기타' }
+                ]
+            },
+            growth_obesity: {
+                title: '#비만',
+                fields: [
+                    { type: 'group', title: '📊 기본 정보', fields: [
+                        { type: 'text', label: 'BMI 백분위수', name: 'bmiPercentile', placeholder: '예: 95%' },
+                        { type: 'text', label: 'o/s', name: 'os', placeholder: '언제부터 비만이었는지' },
+                        { type: 'horizontal_group', fields: [
+                            { type: 'text', label: '식습관', name: 'eatingHabits', placeholder: '예: 야식, 과자 즐겨먹음' },
+                            { type: 'text', label: '운동량', name: 'activityLevel', placeholder: '예: 거의 없음' }
+                        ]},
+                        { type: 'text', label: '부모 체형', name: 'parentBodyType', placeholder: '예: 부(비만), 모(과체중)' }
+                    ]},
+                    { type: 'textarea', name: 'other', title: '📝 기타' }
+                ]
+            },
+            acupuncture_facial_palsy: {
+                title: '#Facial palsy',
+                fields: [
+                    {
+                        type: 'group',
+                        title: '📊 C/C',
+                        fields: [
+                            {
+                                type: 'radio',
+                                label: 'Side',
+                                name: 'palsy_side',
+                                options: ['Rt', 'Lt', 'Both']
+                            },
+                            {
+                                type: 'select',
+                                label: 'House-Brackmann Grade',
+                                name: 'hb_grade',
+                                options: ['Select', 'H-B Gr. Ⅱ', 'H-B Gr. Ⅱ-Ⅲ', 'H-B Gr. Ⅲ', 'H-B Gr. Ⅲ-Ⅳ', 'H-B Gr. Ⅳ', 'H-B Gr. Ⅳ-Ⅴ', 'H-B Gr. Ⅴ'],
+                                noLabelInChart: true
+                            },
+                            {
+                                type: 'text',
+                                label: 'o/s',
+                                name: 'onset_description',
+                                placeholder: '※ 이후통 등 전조증상나타난 시기가 아닌 안면근육의 근력저하가 나타난 시점'
+                            },
+                            {
+                                type: 'radio',
+                                label: 'State',
+                                name: 'palsy_state',
+                                options: ['mild improving state', 'stationary state', 'aggravating state'],
+                                noLabelInChart: true,
+                                hasDetails: true,
+                                nameText: 'palsy_state_text'
+                            },
+                            {
+                                type: 'symptoms_grid',
+                                color: 'blue',
+                                title: '',
+                                symptoms: [
+                                    { key: 'prodromal', label: 'Prodromal Sx.' }
+                                ]
+                            },
+                            {
+                                type: 'text',
+                                name: 'cc_description',
+                                placeholder: '서술형 C/C 입력...'
+                            },
+                        ]
+                    },
+                    {
+                        type: 'group',
+                        title: '🩺 ROS',
+                        color: 'green',
+                        chartFormat: 'ros_narrative',
+                        fields: [
+                            {
+                                type: 'symptoms_grid',
+                                color: 'red',
+                                title: '🤢 Associated Sx.',
+                                chartFormat: 'associatedSxCustom',
+                                symptoms: [
+                                    { key: 'postauricularPain', label: 'pressure/pain behind ear', className: 'sm:col-span-2' },
+                                    { key: 'otalgia', label: 'otalgia' },
+                                    { key: 'hyperacusis', label: 'hyperacusis' },
+                                    { key: 'decreasedTaste', label: 'decreased taste', className: 'sm:col-span-2' },
+                                    { key: 'dryEye', label: 'dry eye' },
+                                    { key: 'excessiveTearing', label: 'excessive tearing', className: 'sm:col-span-2' },
+                                    { key: 'vesicle', label: 'vesicle' },
+                                    { type: 'separator' },
+                                    { key: 'headache', label: 'HA' },
+                                    { key: 'dizziness', label: 'dizziness' },
+                                    { key: 'nausea', label: 'Nausea' },
+                                    { key: 'vomiting', label: 'Vomiting' },
+                                    { type: 'separator' },
+                                    { key: 'hearingLoss', label: 'HL' },
+                                    { key: 'tinnitus', label: 'tinnitus' },
+                                    { key: 'earFullness', label: 'ear fullness' },
+                                    { type: 'separator' },
+                                    { key: 'facialNumbness', label: 'facial numbness' },
+                                    { key: 'facialPain', label: 'facial pain' },
+                                ]
+                            },
+                             {
+                                type: 'text',
+                                name: 'assoc_sx_description',
+                                placeholder: 'Associated Sx. 관련 서술...'
+                            },
+                            {
+                                type: 'symptoms_grid',
+                                color: 'purple',
+                                title: 'Bulbar sx.',
+                                chartFormat: 'groupedSx',
+                                chartName: 'diplopia/dysarthria/dysphagia',
+                                symptoms: [
+                                    { key: 'diplopia', label: 'diplopia' },
+                                    { key: 'dysarthria', label: 'dysarthria' },
+                                    { key: 'dysphagia', label: 'dysphagia' }
+                                ]
+                            },
+                        ]
+                    },
+                    {
+                        type: 'group',
+                        title: '🩺 P/Ex',
+                        color: 'yellow',
+                        chartFormat: 'pex_narrative',
+                        fields: [
+                            { type: 'text', name: 'pex_tm', label: 'TM', placeholder: '예 : both intact' },
+                            { type: 'text', name: 'pex_eac', label: 'EAC', placeholder: '예 : no visible vesicle' },
+                            {
+                                type: 'symptoms_grid',
+                                color: 'transparent',
+                                title: '',
+                                symptoms: [
+                                     { key: 'tongueDeviation', label: 'tongue devi', textPlaceholder: '예 : to Lt / to Rt' },
+                                ]
+                            },
+                            {
+                                type: 'symptoms_grid',
+                                color: 'purple',
+                                title: 'sensory/motor Sx',
+                                chartFormat: 'groupedSx',
+                                chartName: 'sensory/motor Sx',
+                                symptoms: [
+                                    { key: 'sensorySx', label: 'sensory Sx' },
+                                    { key: 'motorSx', label: 'motor Sx' }
+                                ]
+                            },
+                            { type: 'subtitle', text: '<Facial palsy 평가>' },
+                            { type: 'radio', name: 'pex_appearance', label: '1. Appearance', options: ['asymmetric', 'symmetric'] },
+                            { type: 'radio', name: 'pex_at_rest', label: '2. At rest', options: ['asymmetric', 'symmetric'] },
+                            { type: 'radio', name: 'pex_forehead', label: '3. Forehead motion', options: ['slightly movement', 'slightly~mod movement', 'mod movement', 'mass movement'] },
+                            { type: 'radio', name: 'pex_eyelid', label: '4. Eyelid closure', options: ['complete c effort', 'incomplete c effort'] },
+                            { type: 'radio', name: 'pex_mouth', label: '5. mouth motion', options: ['Asymmetric c Max effort', 'slightly weak c Max effort', 'Symmetric'] },
+                            { type: 'radio', name: 'pex_hb_grade', label: '-> HB Gr', options: ['Ⅰ', 'Ⅱ', 'Ⅱ-Ⅲ', 'Ⅲ', 'Ⅲ-Ⅳ', 'Ⅳ', 'Ⅳ-Ⅴ', 'Ⅴ'] }
+                        ]
+                    },
+                    { type: 'textarea', name: 'other', title: '📝 etc' }
+                ]
+            }
+        };
+        
+        formConfig.growth_precocious_puberty.fields = formConfig.growth_growth.fields;
+
+        const sidebarData = [
+            { name: '소아과', icon: '<i class="fa-solid fa-bone"></i>', key: 'growth', items: [
+                { name: '성장', key: 'growth_growth' }, { name: '성조숙증', key: 'growth_precocious_puberty' },
+                { name: '저체중', key: 'growth_underweight' }, { name: '비만', key: 'growth_obesity' },
+            ]},
+            { name: '침구과', icon: '<i class="fa-solid fa-face-grimace"></i>', key: 'acupuncture', items: [
+                { name: '안면마비', key: 'acupuncture_facial_palsy' },
+            ]},
+        ];
+
+        let activeView = 'growth_growth';
+        let formDatas = {};
+        let summaries = {};
+        let chartParts = {};
+        let interactionOrder = [];
+        let additionalText = '';
+
+        const createInitialState = (fields) => {
+            const state = {};
+            if (!fields) return state;
+            fields.forEach(field => {
+                if (field.type === 'group' || field.type === 'horizontal_group') {
+                    Object.assign(state, createInitialState(field.fields));
+                } else if (field.type === 'symptoms_grid') {
+                    field.symptoms?.forEach(symptom => {
+                        if(symptom.key) {
+                           state[symptom.key] = '';
+                           state[`${symptom.key}Text`] = '';
+                        }
+                    });
+                } else if (field.name) {
+                    state[field.name] = '';
+                    if (field.nameText) {
+                        state[field.nameText] = '';
+                    }
+                }
+            });
+            return state;
+        };
+
+        const generateChartText = (formData, config, summary) => {
+            if (!formData || !config || !config.fields) return '';
+            const lines = [];
+            const processField = (field) => {
+                const cleanLabel = (field.label || field.title || '').replace(/[^\uAC00-\uD7A3\w\s.,()/-]/g, '').trim();
+                switch (field.type) {
+                    case 'text':
+                        if (formData[field.name]) {
+                            if(cleanLabel){
+                                lines.push(`-${cleanLabel} : ${formData[field.name]}`);
+                            } else {
+                                lines.push(`- ${formData[field.name]}`);
+                            }
+                        }
+                        break;
+                    case 'radio':
+                        if (field.name === 'palsy_side') break;
+                        if (formData[field.name]) {
+                            let radioValue = formData[field.name];
+                            if (field.hasDetails && formData[field.nameText]) radioValue += ` (${formData[field.nameText]})`;
+                            lines.push(field.noLabelInChart ? `- ${radioValue}` : `-${cleanLabel} : ${radioValue}`);
+                        }
+                        break;
+                    case 'select':
+                        if (formData[field.name] && formData[field.name] !== field.options?.[0]) {
+                             lines.push(field.noLabelInChart ? `- ${formData[field.name]}` : `-${cleanLabel} : ${formData[field.name]}`);
+                        }
+                        break;
+                    case 'symptoms_grid': {
+                        if (field.chartFormat === 'associatedSxCustom') {
+                             const groups = {
+                                'N/V': ['nausea', 'vomiting']
+                            };
+                            const processChunk = (chunk) => {
+                                const results = [];
+                                const processedGroups = new Set();
+                                chunk.forEach(symptom => {
+                                    let partOfGroup = null;
+                                    for (const groupName in groups) {
+                                        if (groups[groupName].includes(symptom.key)) {
+                                            partOfGroup = groupName;
+                                            break;
+                                        }
+                                    }
+                                    if (partOfGroup) {
+                                        if (processedGroups.has(partOfGroup)) return;
+                                        const keysInGroup = groups[partOfGroup];
+                                        const statuses = keysInGroup.map(key => formData[key] || '-');
+                                        if (statuses.some(s => s !== '-')) {
+                                            results.push(`${groupName}(${statuses.join('/')})`);
+                                        }
+                                        processedGroups.add(partOfGroup);
+                                    } else {
+                                        const status = formData[symptom.key];
+                                        if (!status) return;
+                                        const textValue = formData[`${symptom.key}Text`];
+                                        results.push(textValue ? `${symptom.label}(${status}, ${textValue})` : `${symptom.label}(${status})`);
+                                    }
+                                });
+                                return results.join(' ');
+                            };
+
+                            const chunks = [];
+                            let currentChunk = [];
+                            field.symptoms.forEach(symptom => {
+                                if (symptom.type === 'separator') {
+                                    if (currentChunk.length > 0) chunks.push(processChunk(currentChunk));
+                                    currentChunk = [];
+                                } else {
+                                    currentChunk.push(symptom);
+                                }
+                            });
+                            if (currentChunk.length > 0) chunks.push(processChunk(currentChunk));
+                            
+                            const validLines = chunks.filter(line => line.length > 0);
+                            if (validLines.length > 0) {
+                                lines.push(`Associated Sx.>\n${validLines.join('\n')}`);
+                            }
+                        } else if (field.chartFormat === 'groupedSx') {
+                            const statuses = field.symptoms.map(symptom => formData[symptom.key] || '-');
+                            if (statuses.some(s => s !== '-')) {
+                                const statusString = `(${statuses.join('/')})`;
+                                let line = `-${field.title} : ${field.chartName}${statusString}`;
+                                lines.push(line);
+                            }
+                        } else {
+                            const symptomLine = field.symptoms
+                                .map(symptom => {
+                                    const status = formData[symptom.key];
+                                    if (!status) return null;
+                                    const textValue = formData[`${symptom.key}Text`];
+                                    return textValue ? `${symptom.label}(${status}, ${textValue})` : `${symptom.label}(${status})`;
+                                })
+                                .filter(Boolean).join(' ');
+                            if (symptomLine) {
+                                const prefix = cleanLabel ? `-${cleanLabel} : ` : '- ';
+                                lines.push(`${prefix}${symptomLine}`);
+                            }
+                        }
+                        break;
+                    }
+                    case 'group': {
+                        const linesBefore = lines.length;
+                        
+                        if (field.chartFormat === 'pex_narrative') {
+                            const pexLines = [];
+                            const fd = formDatas[activeView] || {};
+                            
+                            const simpleFields = ['pex_tm', 'pex_eac'];
+                            simpleFields.forEach(name => {
+                                if(fd[name]) {
+                                    const subField = field.fields.find(f => f.name === name);
+                                    if(subField) pexLines.push(`- ${subField.label} : ${fd[name]}`);
+                                }
+                            });
+                           
+                            if(fd.tongueDeviation) {
+                                const text = fd.tongueDeviationText ? ` (${fd.tongueDeviationText})` : '';
+                                pexLines.push(`- tongue devi(${fd.tongueDeviation})${text}`);
+                            }
+
+                            const sensoryStatus = fd.sensorySx || '-';
+                            const motorStatus = fd.motorSx || '-';
+                            if(sensoryStatus !== '-' || motorStatus !== '-') {
+                                pexLines.push(`- sensory/motor Sx(${sensoryStatus}/${motorStatus})`);
+                            }
+
+                            const evalLines = [];
+                            let hasEvalContent = false;
+                             field.fields.forEach(subField => {
+                                if (subField.type === 'radio' && fd[subField.name]) {
+                                    hasEvalContent = true;
+                                    if (subField.name === 'pex_hb_grade') {
+                                        evalLines.push(`  -> HB Gr ${fd[subField.name]}`);
+                                    } else {
+                                        evalLines.push(`  ${subField.label} : ${fd[subField.name]}`);
+                                    }
+                                }
+                            });
+
+                            if(hasEvalContent){
+                                pexLines.push('<Facial palsy 평가>');
+                                pexLines.push(...evalLines);
+                            }
+
+                            if (pexLines.length > 0) {
+                                lines.push(`# P/Ex\n${pexLines.join('\n')}`);
+                            }
+                        } else {
+                            field.fields.forEach(processField);
+                        }
+
+                        if (lines.length > linesBefore && field.chartFormat === 'ros_narrative') {
+                            const newLines = lines.splice(linesBefore);
+                            lines.push(`# ROS\n${newLines.join('\n')}`);
+                        }
+                        break;
+                    }
+                    case 'horizontal_group':
+                         field.fields.forEach(processField);
+                         break;
+                }
+            };
+            config.fields.forEach(processField);
+            const otherField = config.fields.find((f) => f.type === 'textarea' && f.name === 'other');
+            if (otherField && formData.other && formData.other.trim()) {
+                lines.push(`+ ${formData.other.trim()}`);
+            }
+            let dynamicTitle = config.title;
+            if (formData && formData.palsy_side) {
+                dynamicTitle = `${config.title.replace('#', '# ')}, ${formData.palsy_side}`;
+            }
+            const titleLine = summary ? `${dynamicTitle} ("${summary}")` : dynamicTitle;
+            if (lines.length === 0 && !summary && dynamicTitle === config.title) {
+                return '';
+            }
+            return `${titleLine}\n${lines.join('\n')}`;
+        };
+        
+        function renderSidebar() {
+            const nav = document.getElementById('sidebar-nav');
+            nav.innerHTML = '';
+            sidebarData.forEach(category => {
+                const categoryDiv = document.createElement('div');
+                categoryDiv.innerHTML = `
+                    <h3 class="flex items-center space-x-2 px-3 py-2 text-sm font-bold text-gray-800">
+                        ${category.icon}
+                        <span>${category.name}</span>
+                    </h3>
+                    <div class="pl-3 mt-1 grid grid-cols-2 gap-1">
+                        ${category.items.map(item => `
+                            <button data-view="${item.key}" class="sidebar-btn w-full text-left px-2 py-1.5 text-sm font-medium rounded-md transition-all ${activeView === item.key ? 'bg-blue-600 text-white' : 'text-gray-600 hover:bg-gray-200'}">
+                                <span>${item.name}</span>
+                            </button>
+                        `).join('')}
+                    </div>
+                `;
+                nav.appendChild(categoryDiv);
+            });
+            document.querySelectorAll('.sidebar-btn').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    activeView = e.currentTarget.dataset.view;
+                    renderSidebar();
+                    renderActiveView();
+                });
+            });
+        }
+
+        function renderActiveView() {
+            const main = document.getElementById('main-content');
+            main.innerHTML = '';
+            const config = formConfig[activeView];
+            if (!config) return;
+            const header = document.createElement('div');
+            header.className = 'flex items-center gap-4 mb-6 pb-4 border-b';
+            header.innerHTML = `<h2 class="text-2xl font-bold text-gray-800 whitespace-nowrap">${config.title.replace('#', '')}</h2>`;
+            const summaryInput = document.createElement('input');
+            summaryInput.type = 'text';
+            summaryInput.placeholder = '한 줄 요약...';
+            summaryInput.value = summaries[activeView] || '';
+            summaryInput.className = 'w-full p-2 border border-gray-300 rounded text-sm';
+            summaryInput.addEventListener('input', (e) => {
+                summaries[activeView] = e.target.value;
+                updateChart();
+            });
+            header.appendChild(summaryInput);
+            main.appendChild(header);
+            const fieldsContainer = document.createElement('div');
+            fieldsContainer.className = 'space-y-6';
+            if (config.fields && config.fields.length > 0) {
+                config.fields.forEach(field => {
+                    fieldsContainer.appendChild(renderField(field));
+                });
+            }
+            main.appendChild(fieldsContainer);
+        }
+        
+        function renderField(field) {
+            const fieldWrapper = document.createElement('div');
+            const formData = formDatas[activeView];
+            const colorMap = { 'red': 'bg-red-50', 'green': 'bg-green-50', 'blue': 'bg-blue-50', 'purple': 'bg-purple-50', 'yellow': 'bg-yellow-50', 'transparent': 'bg-transparent' };
+            const bgColor = colorMap[field.color] || 'bg-blue-50';
+            switch(field.type) {
+                case 'group':
+                    fieldWrapper.className = `${bgColor} p-4 rounded-lg space-y-4`;
+                    fieldWrapper.innerHTML = `<h3 class="text-lg font-semibold text-gray-700">${field.title}</h3>`;
+                    field.fields.forEach(subField => {
+                        fieldWrapper.appendChild(renderField(subField));
+                    });
+                    break;
+                case 'subtitle':
+                    fieldWrapper.className = 'text-md font-semibold text-gray-800 pt-2';
+                    fieldWrapper.textContent = field.text;
+                    break;
+                case 'horizontal_group':
+                    fieldWrapper.className = 'space-y-4';
+                     if(field.title) {
+                        fieldWrapper.innerHTML = `<h3 class="text-lg font-semibold text-gray-700">${field.title}</h3>`;
+                    }
+                    const gridDiv = document.createElement('div');
+                    gridDiv.className = 'grid grid-cols-1 sm:grid-cols-2 gap-4';
+                    field.fields.forEach(subField => gridDiv.appendChild(renderField(subField)));
+                    fieldWrapper.appendChild(gridDiv);
+                    break;
+                case 'symptoms_grid':
+                    fieldWrapper.className = `${bgColor} p-4 rounded-lg`;
+                    if(bgColor === 'bg-transparent') fieldWrapper.classList.remove('p-4', 'rounded-lg');
+
+                    if(field.title) {
+                        fieldWrapper.innerHTML = `<h3 class="text-lg font-semibold text-gray-700 mb-3">${field.title}</h3>`;
+                    }
+                    const symptomGrid = document.createElement('div');
+                    symptomGrid.className = 'grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-4';
+                    field.symptoms.forEach(symptom => {
+                        if (symptom.type === 'separator') {
+                            const separator = document.createElement('div');
+                            separator.className = 'sm:col-span-2 my-1 border-t border-gray-300';
+                            symptomGrid.appendChild(separator);
+                            return; 
+                        }
+                        const symptomDiv = document.createElement('div');
+                        symptomDiv.className = `space-y-2 ${symptom.className || ''}`;
+                        const value = formData[symptom.key];
+                        const textValue = formData[`${symptom.key}Text`] || '';
+                        const getButtonClass = (buttonValue) => {
+                            const base = "px-2.5 py-1 rounded border text-sm font-semibold transition-colors";
+                            if (value === buttonValue) return buttonValue === '+' ? `${base} bg-green-600 text-white border-green-700` : `${base} bg-red-600 text-white border-red-700`;
+                            return buttonValue === '+' ? `${base} bg-white text-green-700 border-gray-300 hover:bg-green-50` : `${base} bg-white text-red-700 border-gray-300 hover:bg-red-50`;
+                        };
+                        symptomDiv.innerHTML = `
+                            <div class="flex items-center space-x-2">
+                                <span class="text-sm font-medium text-gray-700 min-w-fit">${symptom.label}:</span>
+                                <div class="flex space-x-2">
+                                    <button type="button" data-key="${symptom.key}" data-value="+" class="${getButtonClass('+')}">+</button>
+                                    <button type="button" data-key="${symptom.key}" data-value="-" class="${getButtonClass('-')}">-</button>
+                                </div>
+                            </div>
+                            ${value ? `<input type="text" name="${symptom.key}Text" placeholder="${symptom.textPlaceholder || `${symptom.label} 세부사항...`}" value="${textValue}" class="w-full p-1.5 border border-gray-300 rounded text-xs" />` : ''}
+                        `;
+                        symptomDiv.querySelectorAll('button').forEach(btn => btn.addEventListener('click', handleSymptomChange));
+                        if(symptomDiv.querySelector('input')) {
+                           symptomDiv.querySelector('input').addEventListener('input', handleInputChange);
+                        }
+                        symptomGrid.appendChild(symptomDiv);
+                    });
+                    fieldWrapper.appendChild(symptomGrid);
+                    break;
+                case 'radio':
+                    fieldWrapper.innerHTML = `
+                        <label class="text-sm font-medium text-gray-700 mb-2 block">${field.label}</label>
+                        <div class="flex flex-wrap gap-x-4 gap-y-2">
+                            ${field.options.map(option => `
+                                <label class="flex items-center space-x-1 cursor-pointer">
+                                    <input type="radio" name="${field.name}" value="${option}" ${formData[field.name] === option ? 'checked' : ''} class="h-4 w-4 text-blue-600 border-gray-300 focus:ring-blue-500"/>
+                                    <span class="text-sm">${option}</span>
+                                </label>
+                            `).join('')}
+                        </div>
+                    `;
+                    fieldWrapper.querySelectorAll('input[type="radio"]').forEach(radio => radio.addEventListener('click', handleInputChange));
+                    if (field.hasDetails && formData[field.name]) {
+                        const textInput = document.createElement('input');
+                        textInput.type = 'text';
+                        textInput.name = field.nameText;
+                        textInput.value = formData[field.nameText] || '';
+                        textInput.placeholder = '세부사항 입력...';
+                        textInput.className = 'w-full p-2 border border-gray-300 rounded text-sm mt-2';
+                        textInput.addEventListener('input', handleInputChange);
+                        fieldWrapper.appendChild(textInput);
+                    }
+                    break;
+                case 'select':
+                     fieldWrapper.innerHTML = `
+                        <label class="text-sm font-medium text-gray-700 mb-1 block">${field.label}</label>
+                        <select name="${field.name}" class="w-full p-2 border border-gray-300 rounded text-sm bg-white">
+                            ${field.options.map(opt => `<option value="${opt}" ${formData[field.name] === opt ? 'selected' : ''}>${opt}</option>`).join('')}
+                        </select>
+                    `;
+                    fieldWrapper.querySelector('select').addEventListener('change', handleInputChange);
+                    break;
+                case 'text':
+                    fieldWrapper.innerHTML = `
+                        ${field.label ? `<label class="text-sm font-medium text-gray-700 mb-1 block">${field.label}</label>` : ''}
+                        <input type="text" name="${field.name}" value="${formData[field.name] || ''}" placeholder="${field.placeholder || ''}" class="w-full p-2 border border-gray-300 rounded text-sm" />
+                    `;
+                    fieldWrapper.querySelector('input').addEventListener('input', handleInputChange);
+                    break;
+                case 'textarea':
+                     fieldWrapper.className = `bg-yellow-50 p-4 rounded-lg`;
+                     fieldWrapper.innerHTML = `
+                        <h3 class="text-lg font-semibold text-gray-700 mb-3">${field.title}</h3>
+                        <input type="text" name="${field.name}" value="${formData[field.name] || ''}" placeholder="추가로 기록할 내용을 입력하세요..." class="w-full p-2 border border-gray-300 rounded text-sm" />
+                     `;
+                     fieldWrapper.querySelector('input').addEventListener('input', handleInputChange);
+                     break;
+            }
+            return fieldWrapper;
+        }
+
+        function handleInputChange(e) {
+            const { name, value, type } = e.target;
+            const currentData = formDatas[activeView];
+
+            if (type === 'radio') {
+                if (currentData[name] === value) {
+                    currentData[name] = ''; // Deselect if clicking the same one
+                } else {
+                    currentData[name] = value;
+                }
+            } else {
+                 currentData[name] = value;
+            }
+
+            if (type === 'radio' || type === 'select-one') {
+                renderActiveView();
+            }
+            updateChart();
+        }
+
+        function handleSymptomChange(e) {
+            const { key, value } = e.currentTarget.dataset;
+            const currentVal = formDatas[activeView][key];
+            formDatas[activeView][key] = currentVal === value ? '' : value;
+            renderActiveView();
+            updateChart();
+        }
+
+        function updateChart() {
+            const config = formConfig[activeView];
+            if (!config) return;
+            const chartText = generateChartText(formDatas[activeView], config, summaries[activeView]);
+            chartParts[activeView] = chartText;
+            const hasText = chartText.trim() !== '';
+            const isInOrder = interactionOrder.includes(activeView);
+            if (hasText && !isInOrder) {
+                interactionOrder.push(activeView);
+            } else if (!hasText && isInOrder) {
+                interactionOrder = interactionOrder.filter(item => item !== activeView);
+            }
+            const mainChart = interactionOrder.map(key => chartParts[key]).filter(Boolean).join('\n\n');
+            let newCombinedChart = mainChart;
+            if (additionalText.trim()) {
+                if (newCombinedChart) newCombinedChart += '\n\n';
+                newCombinedChart += additionalText.trim();
+            }
+            document.getElementById('combined-chart-textarea').value = newCombinedChart;
+            document.getElementById('copy-btn').disabled = !newCombinedChart;
+        }
+
+        function resetAll() {
+            const initialFormData = {};
+            Object.keys(formConfig).forEach(key => {
+                initialFormData[key] = createInitialState(formConfig[key].fields);
+            });
+            activeView = 'growth_growth';
+            interactionOrder = [];
+            summaries = {};
+            chartParts = {};
+            additionalText = '';
+            formDatas = JSON.parse(JSON.stringify(initialFormData));
+            renderSidebar();
+            renderActiveView();
+            updateChart();
+            document.getElementById('additional-text-textarea').value = '';
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            let initialFormData = {};
+            Object.keys(formConfig).forEach(key => {
+                 initialFormData[key] = createInitialState(formConfig[key].fields);
+            });
+            formDatas = JSON.parse(JSON.stringify(initialFormData));
+            renderSidebar();
+            renderActiveView();
+            updateChart();
+            document.getElementById('reset-btn').addEventListener('click', resetAll);
+            document.getElementById('copy-btn').addEventListener('click', () => {
+                const textToCopy = document.getElementById('combined-chart-textarea').value;
+                if (!textToCopy) return;
+                navigator.clipboard.writeText(textToCopy).then(() => {
+                    const btnText = document.getElementById('copy-btn-text');
+                    const originalText = btnText.textContent;
+                    btnText.textContent = '복사됨!';
+                    document.getElementById('copy-btn').classList.replace('bg-blue-600', 'bg-green-500');
+                    setTimeout(() => {
+                        btnText.textContent = originalText;
+                        document.getElementById('copy-btn').classList.replace('bg-green-500', 'bg-blue-600');
+                    }, 2000);
+                }).catch(err => console.error('복사 실패:', err));
+            });
+            document.getElementById('additional-text-textarea').addEventListener('input', (e) => {
+                additionalText = e.target.value;
+                updateChart();
+            });
+        });
+    </script>
+</body>
+</html>
+
